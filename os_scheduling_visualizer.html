@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OS Scheduling Visualizer</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1c2430;--mut:#667085;--bd:#d9dee5;--pri:#2563eb;--ok:#16a34a;--bad:#dc2626;--grid:#e5e8ed}
+@media (prefers-color-scheme:dark){:root{--bg:#12161c;--card:#1b212a;--tx:#e6e9ee;--mut:#98a2b3;--bd:#2d3643;--pri:#60a5fa;--ok:#4ade80;--bad:#f87171;--grid:#2a313c}}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--tx);line-height:1.45}
+header{padding:16px;border-bottom:1px solid var(--bd);background:var(--card)}
+h1{margin:0;font-size:1.25rem}header p{margin:2px 0 0;color:var(--mut);font-size:.85rem}
+.tabs{display:flex;gap:8px;padding:12px 16px 0}
+.tab{padding:8px 14px;border:1px solid var(--bd);border-radius:8px 8px 0 0;background:var(--card);color:var(--mut);cursor:pointer;font-weight:600}
+.tab.on{color:var(--pri);border-bottom-color:var(--card)}
+main{padding:0 16px 24px;max-width:1000px;margin:0 auto}
+section{display:none}section.on{display:block}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px;margin-top:14px}
+h2{font-size:1rem;margin:0 0 10px}
+.row{display:flex;flex-wrap:wrap;gap:10px}
+label{display:flex;flex-direction:column;font-size:.8rem;color:var(--mut);gap:3px;flex:1 1 140px}
+input,select,button{font:inherit;padding:8px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--tx)}
+button{cursor:pointer;background:var(--card);font-weight:600}
+button.p{background:var(--pri);color:#fff;border-color:var(--pri)}
+button:disabled{opacity:.45;cursor:default}
+.err{color:var(--bad);font-size:.85rem;margin-top:8px;min-height:1.2em}
+.ctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+.ctl input[type=range]{padding:0;flex:1 1 100px}
+.sc{overflow:auto;max-height:480px;border:1px solid var(--bd);border-radius:8px}
+canvas{display:block;width:100%}
+.stat{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
+.stat div{flex:1 1 130px;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px}
+.stat b{display:block;font-size:1.15rem}.stat span{font-size:.75rem;color:var(--mut)}
+.seq{font-family:ui-monospace,Menlo,monospace;font-size:.85rem;word-break:break-word;margin-top:10px}
+.seq i{font-style:normal;padding:1px 5px;border-radius:4px;background:var(--bg);border:1px solid var(--bd);display:inline-block;margin:2px}
+.seq i.cur{background:var(--pri);color:#fff;border-color:var(--pri)}
+table{border-collapse:collapse;width:100%;font-size:.85rem}
+th,td{border:1px solid var(--bd);padding:5px 6px;text-align:center}
+td input{width:100%;min-width:48px;padding:4px}
+.gantt{display:flex;min-height:44px;margin-top:8px;overflow-x:auto;padding-bottom:4px}
+.seg{height:40px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:.8rem;font-weight:700;border-right:1px solid var(--card);flex:none;transition:width .15s}
+.seg.idle{background:var(--grid)!important;color:var(--mut)}
+.axis{display:flex;font-size:.7rem;color:var(--mut)}.axis span{flex:none;text-align:left;border-left:1px solid var(--bd);padding-left:2px}
+.note{font-size:.8rem;color:var(--mut);margin-top:6px}
+</style>
+</head>
+<body>
+<header><h1>OS Scheduling Visualizer</h1><p>Interactive disk and CPU scheduling – step mode, auto-play and comparison</p></header>
+<div class="tabs"><div class="tab on" data-t="disk">Disk Scheduling</div><div class="tab" data-t="cpu">CPU Scheduling</div></div>
+<main>
+
+<!-- ============ DISK ============ -->
+<section id="disk" class="on">
+<div class="card"><h2>Input</h2>
+<div class="row">
+<label>Disk size (cylinders)<input id="dSize" type="number" value="200"></label>
+<label>Initial head position<input id="dHead" type="number" value="50"></label>
+<label>Direction (SCAN / C-SCAN / LOOK)<select id="dDir"><option value="right">Towards higher (right)</option><option value="left">Towards lower (left)</option></select></label>
+<label>Algorithm<select id="dAlg"><option>FCFS</option><option>SSTF</option><option>SCAN</option><option>C-SCAN</option><option>LOOK</option></select></label>
+</div>
+<label style="margin-top:10px">Request queue (comma or space separated)<input id="dReq" value="82, 170, 43, 140, 24, 16, 190"></label>
+<div class="row" style="margin-top:10px"><button class="p" id="dRun">Run</button><button id="dSample">Load sample input</button></div>
+<div class="err" id="dErr"></div></div>
+
+<div class="card"><h2>Seek graph</h2>
+<div class="ctl"><button id="dPrev">◀ Prev</button><button id="dNext">Next ▶</button><button id="dPlay" class="p">▶ Play</button><button id="dReset">Reset</button>
+<label style="flex:1 1 120px;flex-direction:row;align-items:center">Speed<input id="dSpd" type="range" min="1" max="10" value="5"></label></div>
+<div class="sc"><canvas id="dCv"></canvas></div>
+<div class="stat"><div><b id="dStep">0</b><span>Step</span></div><div><b id="dMoved">0</b><span>Head movement so far</span></div><div><b id="dTotal">0</b><span>Total head movement</span></div></div>
+<div class="seq" id="dSeq"></div>
+<p class="note">SCAN and C-SCAN travel to the disk edge; C-SCAN’s return jump is counted in total movement. LOOK turns at the last request.</p></div>
+
+<div class="card"><h2>Comparison (same input, all algorithms)</h2><canvas id="dBar" height="260"></canvas></div>
+</section>
+
+<!-- ============ CPU ============ -->
+<section id="cpu">
+<div class="card"><h2>Processes</h2>
+<table><thead><tr><th>PID</th><th>Arrival</th><th>Burst</th><th>Priority</th><th></th></tr></thead><tbody id="pBody"></tbody></table>
+<div class="row" style="margin-top:10px">
+<button id="pAdd">+ Add process</button>
+<label>Algorithm<select id="cAlg"><option value="FCFS">FCFS</option><option value="SJF">SJF (non-preemptive)</option><option value="SRTF">SRTF (preemptive SJF)</option><option value="PRIO">Priority (non-preemptive)</option><option value="RR">Round Robin</option></select></label>
+<label>Time quantum (RR)<input id="cQ" type="number" value="2" min="1"></label>
+<button class="p" id="cRun" style="align-self:flex-end">Run</button></div>
+<p class="note">Lower priority number = higher priority.</p>
+<div class="err" id="cErr"></div></div>
+
+<div class="card"><h2>Gantt chart</h2>
+<div class="ctl"><button id="cPrev">◀ Prev</button><button id="cNext">Next ▶</button><button id="cPlay" class="p">▶ Play</button><button id="cReset">Reset</button>
+<label style="flex:1 1 120px;flex-direction:row;align-items:center">Speed<input id="cSpd" type="range" min="1" max="10" value="5"></label></div>
+<div class="gantt" id="gantt"></div><div class="axis" id="axis"></div>
+<div class="stat"><div><b id="cT">0</b><span>Time</span></div><div><b id="cAvgW">–</b><span>Avg waiting time</span></div><div><b id="cAvgT">–</b><span>Avg turnaround time</span></div></div></div>
+
+<div class="card"><h2>Results</h2><div style="overflow:auto"><table><thead><tr><th>PID</th><th>Arrival</th><th>Burst</th><th>Priority</th><th>Completion</th><th>Turnaround</th><th>Waiting</th></tr></thead><tbody id="rBody"></tbody></table></div></div>
+</section>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t));
+  document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id===t.dataset.t));
+  if(t.dataset.t==='disk')drawAll();
+});
+
+/* ---------- generic player (step + autoplay) ---------- */
+function Player(prev,next,play,reset,spd,max,render){
+  let k=0,timer=null;
+  const stop=()=>{clearInterval(timer);timer=null;$(play).textContent='▶ Play'};
+  const set=v=>{k=Math.max(0,Math.min(max(),v));render(k);if(k>=max())stop()};
+  $(next).onclick=()=>{stop();set(k+1)};
+  $(prev).onclick=()=>{stop();set(k-1)};
+  $(reset).onclick=()=>{stop();set(0)};
+  $(play).onclick=()=>{
+    if(timer){stop();return}
+    if(k>=max())k=0;
+    $(play).textContent='⏸ Pause';
+    timer=setInterval(()=>set(k+1),1100-$(spd).value*100);
+  };
+  $(spd).oninput=()=>{if(timer){clearInterval(timer);timer=setInterval(()=>set(k+1),1100-$(spd).value*100)}};
+  return{reset(){stop();set(0)},redraw(){render(k)}};
+}
+
+/* ================= DISK ================= */
+function diskPath(alg,size,head,req,dir){
+  const r=[...req],p=[{c:head,s:false}],push=(c,s)=>p.push({c,s});
+  const lo=r.filter(x=>x<head).sort((a,b)=>b-a);   // below head, nearest first
+  const hi=r.filter(x=>x>=head).sort((a,b)=>a-b);  // at/above head, nearest first
+  if(alg==='FCFS')r.forEach(x=>push(x,true));
+  else if(alg==='SSTF'){let cur=head,rest=[...r];
+    while(rest.length){let bi=0;rest.forEach((x,i)=>{if(Math.abs(x-cur)<Math.abs(rest[bi]-cur))bi=i});
+      cur=rest.splice(bi,1)[0];push(cur,true)}}
+  else if(alg==='SCAN'){
+    if(dir==='right'){hi.forEach(x=>push(x,true));if(lo.length||true)push(size-1,false);lo.forEach(x=>push(x,true))}
+    else{lo.forEach(x=>push(x,true));push(0,false);hi.forEach(x=>push(x,true))}
+  }else if(alg==='C-SCAN'){
+    if(dir==='right'){hi.forEach(x=>push(x,true));push(size-1,false);push(0,false);[...lo].reverse().forEach(x=>push(x,true))}
+    else{lo.forEach(x=>push(x,true));push(0,false);push(size-1,false);[...hi].reverse().forEach(x=>push(x,true))}
+  }else if(alg==='LOOK'){
+    if(dir==='right'){hi.forEach(x=>push(x,true));lo.forEach(x=>push(x,true))}
+    else{lo.forEach(x=>push(x,true));hi.forEach(x=>push(x,true))}
+  }
+  // drop consecutive duplicates that add no movement only for edge markers
+  return p.filter((q,i)=>i===0||q.s||q.c!==p[i-1].c);
+}
+const dTotal=p=>p.reduce((s,q,i)=>i?s+Math.abs(q.c-p[i-1].c):0,0);
+let D=null,dPl;
+
+function readDisk(){
+  const size=Number($('dSize').value),head=Number($('dHead').value);
+  const req=$('dReq').value.split(/[\s,]+/).filter(Boolean).map(Number);
+  let e='';
+  if(!Number.isInteger(size)||size<2)e='Disk size must be an integer ≥ 2.';
+  else if(!Number.isInteger(head)||head<0||head>=size)e=`Head position must be an integer between 0 and ${size-1}.`;
+  else if(!req.length)e='Enter at least one request.';
+  else if(req.some(x=>!Number.isInteger(x)))e='Requests must be integers only.';
+  else if(req.some(x=>x<0||x>=size))e=`Every request must lie between 0 and ${size-1}.`;
+  $('dErr').textContent=e;
+  return e?null:{size,head,req,dir:$('dDir').value};
+}
+function runDisk(){
+  const i=readDisk();if(!i)return;
+  const alg=$('dAlg').value,path=diskPath(alg,i.size,i.head,i.req,i.dir);
+  D={...i,alg,path,total:dTotal(path),all:['FCFS','SSTF','SCAN','C-SCAN','LOOK'].map(a=>({a,t:dTotal(diskPath(a,i.size,i.head,i.req,i.dir))}))};
+  $('dTotal').textContent=D.total;
+  dPl.reset();drawBar();
+}
+function fitCanvas(cv,h){
+  const dpr=window.devicePixelRatio||1,w=cv.parentElement.clientWidth||600;
+  cv.style.height=h+'px';cv.width=w*dpr;cv.height=h*dpr;
+  const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);return[g,w];
+}
+function renderDisk(k){
+  if(!D)return;
+  const pad=28,rowH=28,H=60+D.path.length*rowH,cv=$('dCv');
+  const[g,W0]=fitCanvas(cv,H);const W=Math.max(W0,420);
+  if(W>W0){cv.style.width=W+'px';const[g2]=fitCanvas(cv,H);draw(g2,W)}else{cv.style.width='100%';draw(g,W)}
+  function draw(g,W){
+    const X=c=>pad+c/(D.size-1)*(W-2*pad),Y=i=>46+i*rowH;
+    g.font='11px system-ui';g.textAlign='center';g.fillStyle=css('--mut');g.strokeStyle=css('--grid');
+    const ticks=Math.min(10,D.size-1);
+    for(let t=0;t<=ticks;t++){const c=Math.round(t*(D.size-1)/ticks);g.beginPath();g.moveTo(X(c),30);g.lineTo(X(c),H-8);g.stroke();g.fillText(c,X(c),20)}
+    g.lineWidth=2.5;g.strokeStyle=css('--pri');g.beginPath();
+    for(let i=0;i<=k;i++){i?g.lineTo(X(D.path[i].c),Y(i)):g.moveTo(X(D.path[i].c),Y(i))}g.stroke();
+    for(let i=0;i<=k;i++){const q=D.path[i],cur=i===k;
+      g.beginPath();g.arc(X(q.c),Y(i),cur?7:4.5,0,7);
+      g.fillStyle=i===0?css('--ok'):q.s?css('--pri'):css('--bad');g.fill();
+      if(cur){g.strokeStyle=css('--tx');g.lineWidth=2;g.stroke()}
+      g.fillStyle=css('--tx');g.textAlign=X(q.c)>W-40?'right':'left';g.fillText(q.c,X(q.c)+(X(q.c)>W-40?-10:10),Y(i)+4);
+    }
+    g.textAlign='left';
+  }
+  let moved=0;for(let i=1;i<=k;i++)moved+=Math.abs(D.path[i].c-D.path[i-1].c);
+  $('dStep').textContent=k+' / '+(D.path.length-1);$('dMoved').textContent=moved;
+  $('dSeq').innerHTML='Service sequence: '+D.path.map((q,i)=>`<i class="${i===k?'cur':''}" style="${i>k?'opacity:.35':''}${q.s||i===0?'':';border-style:dashed'}">${q.c}</i>`).join('→')+
+    '<br><span style="color:var(--mut)">Green = start head, blue = request served, red = disk edge turn/jump (no request).</span>';
+  const sc=cv.parentElement;sc.scrollTop=Math.max(0,46+k*rowH-sc.clientHeight/2);
+}
+function drawBar(){
+  if(!D)return;
+  const[g,W]=fitCanvas($('dBar'),260),H=260,pad=34,max=Math.max(...D.all.map(x=>x.t),1),best=Math.min(...D.all.map(x=>x.t));
+  const bw=(W-2*pad)/D.all.length;g.font='12px system-ui';g.textAlign='center';
+  D.all.forEach((x,i)=>{
+    const h=(x.t/max)*(H-80),bx=pad+i*bw+bw*.15,by=H-34-h;
+    g.fillStyle=x.t===best?css('--ok'):css('--pri');g.fillRect(bx,by,bw*.7,h);
+    g.fillStyle=css('--tx');g.fillText(x.t,bx+bw*.35,by-6);g.fillStyle=css('--mut');g.fillText(x.a,bx+bw*.35,H-14);
+  });
+  g.fillStyle=css('--mut');g.textAlign='left';g.fillText('Total head movement (cylinders) – green = lowest',pad,16);
+}
+function drawAll(){dPl&&dPl.redraw();drawBar()}
+dPl=Player('dPrev','dNext','dPlay','dReset','dSpd',()=>D?D.path.length-1:0,renderDisk);
+$('dRun').onclick=runDisk;
+$('dAlg').onchange=runDisk;$('dDir').onchange=runDisk;
+$('dSample').onclick=()=>{$('dSize').value=200;$('dHead').value=50;$('dReq').value='82, 170, 43, 140, 24, 16, 190';runDisk()};
+addEventListener('resize',drawAll);
+
+/* ================= CPU ================= */
+let C=null,cPl;
+function addProc(id,at,bt,pr){
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td><input value="${id}"></td><td><input type="number" value="${at}" min="0"></td><td><input type="number" value="${bt}" min="1"></td><td><input type="number" value="${pr}" min="0"></td><td><button>✕</button></td>`;
+  tr.querySelector('button').onclick=()=>tr.remove();$('pBody').appendChild(tr);
+}
+[['P1',0,5,2],['P2',1,3,1],['P3',2,8,4],['P4',3,6,3]].forEach(a=>addProc(...a));
+$('pAdd').onclick=()=>addProc('P'+($('pBody').rows.length+1),0,1,1);
+
+function cpuSim(src,alg,Q){
+  const ps=src.map((p,i)=>({...p,i,rem:p.bt,added:false,ct:0}));
+  let t=0,done=0,cur=null,used=0;const tl=[],rq=[];
+  const key={FCFS:p=>p.at,SJF:p=>p.bt,PRIO:p=>p.pr,SRTF:p=>p.rem}[alg];
+  while(done<ps.length){
+    ps.forEach(p=>{if(!p.added&&p.at<=t){p.added=true;rq.push(p)}});
+    if(alg==='RR'){
+      if(cur&&used>=Q){rq.push(cur);cur=null}
+      if(!cur&&rq.length){cur=rq.shift();used=0}
+    }else if(alg==='SRTF'||!cur){
+      cur=ps.filter(p=>p.at<=t&&p.rem>0).sort((a,b)=>key(a)-key(b)||a.at-b.at||a.i-b.i)[0]||null;
+    }
+    if(!cur){tl.push(null);t++;continue}
+    tl.push(cur.id);cur.rem--;used++;t++;
+    if(cur.rem===0){cur.ct=t;done++;cur=null}
+  }
+  const segs=[];tl.forEach((id,i)=>{const l=segs[segs.length-1];l&&l.id===id?l.len++:segs.push({id,start:i,len:1})});
+  const res=ps.map(p=>({...p,tat:p.ct-p.at,wt:p.ct-p.at-p.bt}));
+  return{tl,segs,res};
+}
+function readCpu(){
+  const rows=[...$('pBody').rows].map(r=>{const v=[...r.querySelectorAll('input')].map(x=>x.value.trim());return{id:v[0],at:Number(v[1]),bt:Number(v[2]),pr:Number(v[3])}});
+  let e='';const ids=new Set(rows.map(r=>r.id));
+  if(!rows.length)e='Add at least one process.';
+  else if(rows.some(r=>!r.id))e='Every process needs an ID.';
+  else if(ids.size!==rows.length)e='Process IDs must be unique.';
+  else if(rows.some(r=>!Number.isInteger(r.at)||r.at<0))e='Arrival time must be an integer ≥ 0.';
+  else if(rows.some(r=>!Number.isInteger(r.bt)||r.bt<1))e='Burst time must be an integer ≥ 1.';
+  else if(rows.some(r=>!Number.isInteger(r.pr)||r.pr<0))e='Priority must be an integer ≥ 0.';
+  const Q=Number($('cQ').value);
+  if(!e&&$('cAlg').value==='RR'&&(!Number.isInteger(Q)||Q<1))e='Time quantum must be an integer ≥ 1.';
+  $('cErr').textContent=e;return e?null:{rows,Q};
+}
+const col=i=>`hsl(${(i*67+210)%360} 60% 45%)`;
+function runCpu(){
+  const i=readCpu();if(!i)return;
+  const alg=$('cAlg').value,r=cpuSim(i.rows,alg,i.Q);
+  r.order=Object.fromEntries(i.rows.map((p,ix)=>[p.id,ix]));C=r;
+  const n=r.res.length,aw=r.res.reduce((s,p)=>s+p.wt,0)/n,at=r.res.reduce((s,p)=>s+p.tat,0)/n;
+  C.aw=aw.toFixed(2);C.at=at.toFixed(2);
+  $('rBody').innerHTML=r.res.map(p=>`<tr><td>${p.id}</td><td>${p.at}</td><td>${p.bt}</td><td>${p.pr}</td><td>${p.ct}</td><td>${p.tat}</td><td>${p.wt}</td></tr>`).join('')+
+    `<tr><td colspan="5"><b>Average</b></td><td><b>${C.at}</b></td><td><b>${C.aw}</b></td></tr>`;
+  cPl.reset();
+}
+function renderCpu(t){
+  if(!C)return;const U=Math.max(24,Math.min(48,640/C.tl.length));
+  let h='',ax='';
+  C.segs.forEach(s=>{const v=Math.min(s.len,t-s.start);if(v<=0)return;
+    h+=`<div class="seg ${s.id?'':'idle'}" style="width:${v*U}px;${s.id?'background:'+col(C.order[s.id]):''}">${s.id||'idle'}</div>`;
+    ax+=`<span style="width:${v*U}px">${s.start}</span>`});
+  if(t>0)ax+=`<span style="width:1px;border-left:1px solid var(--bd)">${Math.min(t,C.tl.length)}</span>`;
+  $('gantt').innerHTML=h;$('axis').innerHTML=ax;$('cT').textContent=t+' / '+C.tl.length;
+  const end=t>=C.tl.length;$('cAvgW').textContent=end?C.aw:'–';$('cAvgT').textContent=end?C.at:'–';
+}
+cPl=Player('cPrev','cNext','cPlay','cReset','cSpd',()=>C?C.tl.length:0,renderCpu);
+$('cRun').onclick=runCpu;$('cAlg').onchange=runCpu;
+
+runDisk();runCpu();
+</script>
+</body>
+</html>
